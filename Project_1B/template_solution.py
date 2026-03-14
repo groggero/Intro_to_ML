@@ -3,6 +3,7 @@
 # First, we import necessary libraries:
 import numpy as np
 import pandas as pd
+import os
 
 # Add any additional imports here (however, the task is solvable without using 
 # any additional imports)
@@ -110,7 +111,8 @@ def fit_logistic_regression(X, y):
 # Main function. You don't have to change this
 if __name__ == "__main__":
     # Data loading
-    data = pd.read_csv("train.csv")
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    data = pd.read_csv(os.path.join(script_dir, "train.csv"))
     y = data["y"].to_numpy()
     data = data.drop(columns=["Id", "y"])
     # print a few data samples
@@ -120,4 +122,4 @@ if __name__ == "__main__":
     # The function retrieving optimal LR parameters
     w = fit_logistic_regression(X, y)
     # Save results in the required format
-    np.savetxt("./results.csv", w, fmt="%.12f")
+    np.savetxt(os.path.join(script_dir, "results.csv"), w, fmt="%.12f")
