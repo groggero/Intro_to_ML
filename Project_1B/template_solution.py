@@ -6,7 +6,6 @@ import pandas as pd
 
 # Add any additional imports here (however, the task is solvable without using 
 # any additional imports)
-# import ...
 
 def transform_features(X):
     """
@@ -26,9 +25,25 @@ def transform_features(X):
     ----------
     X_transformed: matrix of floats: dim = (700,21), transformed input with 21 features
     """
-    X_transformed = np.zeros((700, 21))
-    # TODO: Enter your code here
-    assert X_transformed.shape == (700, 21)
+    n_samples = X.shape[0]
+    X_transformed = np.zeros((n_samples, 21))
+
+    # Linear features
+    X_transformed[:, 0:5] = X
+
+    # Quadratic features
+    X_transformed[:, 5:10] = X ** 2
+
+    # Exponential features
+    X_transformed[:, 10:15] = np.exp(X)
+
+    # Cosine features
+    X_transformed[:, 15:20] = np.cos(X)
+
+    # Constant feature
+    X_transformed[:, 20] = 1.0
+
+    assert X_transformed.shape == (n_samples, 21)
     return X_transformed
 
 
@@ -48,7 +63,46 @@ def fit_logistic_regression(X, y):
     """
     weights = np.zeros((21,))
     X_transformed = transform_features(X)
-    # TODO: Enter your code here
+
+    def sigmoid(z):
+        z = np.clip(z, -500, 500)
+        return 1.0 / (1.0 + np.exp(-z))
+
+    # Standardize all features except the constant one
+    X_mean = X_transformed[:, :-1].mean(axis=0)
+    X_std = X_transformed[:, :-1].std(axis=0)
+    X_std[X_std == 0] = 1.0
+
+    X_scaled = X_transformed.copy()
+    X_scaled[:, :-1] = (X_scaled[:, :-1] - X_mean) / X_std
+
+    # Hyperparameters
+    learning_rate = 0.1
+    n_iterations = 20000
+    l2_lambda = 1e-3
+    n_samples = X_scaled.shape[0]
+
+    # Gradient descent
+    for _ in range(n_iterations):
+        logits = X_scaled @ weights
+        probs = sigmoid(logits)
+
+        error = probs - y
+        gradient = (X_scaled.T @ error) / n_samples
+
+        # L2 regularization on all weights except the bias term
+        reg_gradient = (l2_lambda / n_samples) * weights
+        reg_gradient[-1] = 0.0
+        gradient += reg_gradient
+
+        weights -= learning_rate * gradient
+
+    # Convert weights back to the original feature space
+    weights_original = np.zeros_like(weights)
+    weights_original[:-1] = weights[:-1] / X_std
+    weights_original[-1] = weights[-1] - np.sum((weights[:-1] * X_mean) / X_std)
+
+    weights = weights_original
     assert weights.shape == (21,)
     return weights
 
