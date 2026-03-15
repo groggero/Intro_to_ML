@@ -5,9 +5,6 @@ import numpy as np
 import pandas as pd
 import os
 
-# Add any additional imports here (however, the task is solvable without using 
-# any additional imports)
-
 def transform_features(X):
     """
     This function transforms the 5 input features of matrix X (x_i denoting the i-th component in a given row of X)
@@ -29,19 +26,19 @@ def transform_features(X):
     n_samples = X.shape[0]
     X_transformed = np.zeros((n_samples, 21))
 
-    # Linear features
+    # Fill columns 0-4 with the original linear features x1, ..., x5
     X_transformed[:, 0:5] = X
 
-    # Quadratic features
+    # Fill columns 5-9 with the quadratic terms x1^2, ..., x5^2
     X_transformed[:, 5:10] = X ** 2
 
-    # Exponential features
+    # Fill columns 10-14 with the exponential terms exp(x1), ..., exp(x5)
     X_transformed[:, 10:15] = np.exp(X)
 
-    # Cosine features
+    # Fill columns 15-19 with the cosine terms cos(x1), ..., cos(x5)
     X_transformed[:, 15:20] = np.cos(X)
 
-    # Constant feature
+    # Last column is the constant feature, which acts as the bias term after training
     X_transformed[:, 20] = 1.0
 
     assert X_transformed.shape == (n_samples, 21)
@@ -62,14 +59,17 @@ def fit_logistic_regression(X, y):
     ----------
     weights: array of floats: dim = (21,), optimal parameters of logistic regression
     """
+    # Initialize the 21 regression weights to zero before gradient descent
     weights = np.zeros((21,))
     X_transformed = transform_features(X)
 
+    # Sigmoid maps logits to probabilities in (0, 1)
     def sigmoid(z):
         z = np.clip(z, -500, 500)
         return 1.0 / (1.0 + np.exp(-z))
 
-    # Standardize all features except the constant one
+    # Standardize only the first 20 features to improve optimization stability;
+    # the constant feature must remain equal to 1 so it can represent the bias
     X_mean = X_transformed[:, :-1].mean(axis=0)
     X_std = X_transformed[:, :-1].std(axis=0)
     X_std[X_std == 0] = 1.0
@@ -77,28 +77,32 @@ def fit_logistic_regression(X, y):
     X_scaled = X_transformed.copy()
     X_scaled[:, :-1] = (X_scaled[:, :-1] - X_mean) / X_std
 
-    # Hyperparameters
+    # These values control the size of each update, the number of updates,
+    # and the strength of L2 regularization
     learning_rate = 0.1
     n_iterations = 20000
     l2_lambda = 1e-3
     n_samples = X_scaled.shape[0]
 
-    # Gradient descent
+    # Perform full-batch gradient descent on the regularized logistic loss
     for _ in range(n_iterations):
         logits = X_scaled @ weights
         probs = sigmoid(logits)
 
+        # For logistic regression with cross-entropy loss, probs - y is the core error term
         error = probs - y
         gradient = (X_scaled.T @ error) / n_samples
 
-        # L2 regularization on all weights except the bias term
+        # Add the gradient of the L2 penalty to discourage overly large weights;
+        # the bias is excluded from regularization
         reg_gradient = (l2_lambda / n_samples) * weights
         reg_gradient[-1] = 0.0
         gradient += reg_gradient
 
         weights -= learning_rate * gradient
 
-    # Convert weights back to the original feature space
+    # Training was done on standardized features, but submission requires weights
+    # for the original feature space, so we undo the scaling here
     weights_original = np.zeros_like(weights)
     weights_original[:-1] = weights[:-1] / X_std
     weights_original[-1] = weights[-1] - np.sum((weights[:-1] * X_mean) / X_std)
@@ -119,7 +123,7 @@ if __name__ == "__main__":
     print(data.head())
 
     X = data.to_numpy()
-    # The function retrieving optimal LR parameters
+    # Fit the logistic regression model and obtain the final 21 coefficients
     w = fit_logistic_regression(X, y)
-    # Save results in the required format
+    # Save one weight per line, exactly as required for submission
     np.savetxt(os.path.join(script_dir, "results.csv"), w, fmt="%.12f")
