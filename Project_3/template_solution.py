@@ -35,7 +35,12 @@ https://pytorch.org/tutorials/recipes/recipes/tensorboard_with_pytorch.html
 # https://pytorch.org/docs/stable/notes/mps.html
 
 # It is important that your model and all data are on the same device.
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+if torch.cuda.is_available():
+    device = torch.device("cuda:0")
+elif torch.backends.mps.is_available():
+    device = torch.device("mps")
+else:
+    device = torch.device("cpu")
 
 
 def load_data(**kwargs):
@@ -66,13 +71,15 @@ def load_data(**kwargs):
     # Make the test data a tensor
     test_data_input = torch.tensor(test_data_input, dtype=torch.float32)
 
-    ########################################
-    # TODO: Given the original training images, create the input images and the
-    # label images to train your model. 
-    # Replace the two placholder lines below (which currently just copy the
-    # training data) with your own implementation.
+    # Normalize to [0, 1]
+    train_data = train_data / 255.0
+    test_data_input = test_data_input / 255.0
+
+    # Label = full normalized image
     train_data_label = train_data.clone()
+    # Input = label with center region zeroed (same mask applied at test time)
     train_data_input = train_data.clone()
+    train_data_input[:, :, 10:18, 10:18] = 0.0
 
     # Visualize the training data if needed
     # Set to False if you don't want to save the images
@@ -112,29 +119,18 @@ def training(train_data_input, train_data_label, **kwargs):
     model.train()
     model.to(device)
 
-    # TODO: Dummy criterion - change this to the correct loss function
-    # https://pytorch.org/docs/stable/nn.html#loss-functions
-    criterion = lambda x, y: torch.mean((x))
-    # TODO: Dummy optimizer - change this to a more suitable optimizer
-    optimizer = torch.optim.SGD(model.parameters())
+    # MSE loss restricted to the masked center patch (the only region evaluated)
+    def masked_mse(pred, target):
+        return F.mse_loss(pred[:, :, 10:18, 10:18], target[:, :, 10:18, 10:18])
+    criterion = masked_mse
 
-    # TODO: Correctly setup the dataloader - the below is just a placeholder
-    # Also consider that you might not want to use the entire dataset for
-    # training alone
-    # (batch_size needs to be changed)
-    batch_size = 1
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+
+    batch_size = 256
     dataset = TensorDataset(train_data_input, train_data_label)
-    # Consider the shuffle parameter and other parameters of the DataLoader
-    # class (see
-    # https://pytorch.org/docs/stable/data.html#torch.utils.data.DataLoader)
-    data_loader = DataLoader(dataset, batch_size=batch_size)
+    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
-    # Training loop
-    # TODO: Modify the training loop in case you need to
-
-    # TODO: The value of n_epochs is just a placeholder and likely needs to be
-    # changed
-    n_epochs = 1
+    n_epochs = 15
 
     for epoch in range(n_epochs):
         for x, y in tqdm(
@@ -152,35 +148,58 @@ def training(train_data_input, train_data_label, **kwargs):
     return model
 
 
-# TODO: define a model. Here, a basic MLP model is defined. You can completely
-# change this model - and are encouraged to do so.
+class ConvBlock(nn.Module):
+    """Two consecutive Conv2d → BatchNorm → ReLU layers."""
+
+    def __init__(self, in_ch, out_ch):
+        super().__init__()
+        self.block = nn.Sequential(
+            nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_ch),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_ch, out_ch, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_ch),
+            nn.ReLU(inplace=True),
+        )
+
+    def forward(self, x):
+        return self.block(x)
+
+
 class Model(nn.Module):
     """
-    Implement your model here.
+    U-Net encoder-decoder for 28×28 grayscale inpainting.
+    Spatial flow: 28→14→7 (encoder), 7→14→28 (decoder) with skip connections.
+    Output: Sigmoid → values in [0, 1] matching the normalized labels.
     """
 
     def __init__(self):
-        """
-        The constructor of the model.
-        """
         super().__init__()
-        self.fc = nn.Linear(784, 784)
+        # Encoder
+        self.enc1 = ConvBlock(1, 32)
+        self.pool1 = nn.MaxPool2d(2)           # 28×28 → 14×14
+        self.enc2 = ConvBlock(32, 64)
+        self.pool2 = nn.MaxPool2d(2)           # 14×14 → 7×7
+        # Bottleneck
+        self.bottleneck = ConvBlock(64, 128)
+        # Decoder
+        self.up1 = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False)
+        self.dec1 = ConvBlock(128 + 64, 64)    # cat: bottleneck + skip enc2
+        self.up2 = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False)
+        self.dec2 = ConvBlock(64 + 32, 32)     # cat: dec1 + skip enc1
+        # Output head
+        self.head = nn.Sequential(
+            nn.Conv2d(32, 1, kernel_size=1),
+            nn.Sigmoid(),
+        )
 
     def forward(self, x):
-        """
-        The forward pass of the model.
-
-        input: x: torch.Tensor, the input to the model
-
-        output: x: torch.Tensor, the output of the model
-        """
-        # Flatten the image in the last two dimensions
-        x = x.view(x.shape[0], -1)
-        x = self.fc(x)
-        x = F.relu(x)
-        # Reshape the image to the original shape
-        x = x.view(x.shape[0], 1, 28, 28)
-        return x
+        s1 = self.enc1(x)                                       # [N, 32, 28, 28]
+        s2 = self.enc2(self.pool1(s1))                          # [N, 64, 14, 14]
+        b  = self.bottleneck(self.pool2(s2))                    # [N, 128, 7, 7]
+        d1 = self.dec1(torch.cat([self.up1(b), s2], dim=1))    # [N, 64, 14, 14]
+        d2 = self.dec2(torch.cat([self.up2(d1), s1], dim=1))   # [N, 32, 28, 28]
+        return self.head(d2)                                    # [N, 1, 28, 28]
 
 
 def testing(model, test_data_input):
@@ -213,6 +232,9 @@ def testing(model, test_data_input):
             output = model(test_data_input[i : i + batch_size])
             test_data_output.append(output.cpu())
         test_data_output = torch.cat(test_data_output)
+
+    # Scale from [0, 1] back to [0, 255] (data was normalized in load_data)
+    test_data_output = test_data_output * 255.0
 
     # Ensure the output has the correct shape
     assert test_data_output.shape == test_data_input.shape, (
