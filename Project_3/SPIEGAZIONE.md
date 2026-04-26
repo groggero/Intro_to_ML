@@ -58,6 +58,7 @@ I file `.npz` sono archivi NumPy compressi. `["data"]` accede alla chiave che co
 `torch.tensor(..., dtype=torch.float32)` converte l'array NumPy (che è `uint8`, cioè interi 0–255) in un tensore PyTorch di float a 32 bit. Le reti neurali lavorano con numeri floating point, non interi.
 
 La shape risultante è `[N, 1, 28, 28]`:
+
 - `N`: numero di immagini (60 000 train, 10 000 test)
 - `1`: numero di canali (1 = scala di grigi; per immagini RGB sarebbe 3)
 - `28, 28`: altezza e larghezza in pixel
@@ -84,6 +85,7 @@ train_data_input[:, :, 10:18, 10:18] = 0.0 # azzero il centro 8×8
 `.clone()` crea una copia indipendente del tensore (senza clone, modificare `train_data_input` modificherebbe anche `train_data_label` perché punterebbero alla stessa memoria).
 
 `[:, :, 10:18, 10:18]` è uno slice 4D:
+
 - `:` → tutte le immagini
 - `:` → tutti i canali
 - `10:18` → righe dalla 10 alla 17 (8 righe)
@@ -151,13 +153,13 @@ Ogni `ConvBlock` è una sequenza di due volte: **Conv2d → BatchNorm → ReLU**
 class Model(nn.Module):
     def __init__(self):
         super().__init__()
-        # Encoder
-        self.enc1 = ConvBlock(1, 32)
+        # Encoder                           in [1, 28, 28]
+        self.enc1 = ConvBlock(1, 32)      # out [32, 28, 28]
         self.pool1 = nn.MaxPool2d(2)      # 28×28 → 14×14
-        self.enc2 = ConvBlock(32, 64)
+        self.enc2 = ConvBlock(32, 64)     # out [64, 14, 14]
         self.pool2 = nn.MaxPool2d(2)      # 14×14 → 7×7
         # Bottleneck
-        self.bottleneck = ConvBlock(64, 128)
+        self.bottleneck = ConvBlock(64, 128) #out [128, 7, 7]
         # Decoder
         self.up1 = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False)
         self.dec1 = ConvBlock(128 + 64, 64)
@@ -171,6 +173,7 @@ class Model(nn.Module):
 ```
 
 **Encoder** (compressione progressiva):
+
 - `enc1`: 1 canale → 32 feature maps, dimensione spaziale invariata (28×28)
 - `pool1`: `MaxPool2d(2)` dimezza la risoluzione (28×28 → 14×14). Prende il massimo in ogni finestra 2×2. Aumenta il campo recettivo — ogni neurone nel livello successivo "vede" una porzione più grande dell'immagine originale.
 - `enc2`: 32 → 64 feature maps a 14×14
@@ -179,13 +182,15 @@ class Model(nn.Module):
 **Bottleneck**: il punto di massima compressione. 64 → 128 feature maps a 7×7. Qui il modello deve "capire" globalmente l'immagine (es. che cifra è, come è orientata) per poi ricostruire il centro.
 
 **Decoder** (ricostruzione progressiva):
+
 - `up1`: `Upsample(scale_factor=2, mode="bilinear")` raddoppia la risoluzione (7×7 → 14×14) interpolando i pixel. Bilineare è più fluido rispetto a nearest-neighbor e non produce gli artefatti a scacchiera delle ConvTranspose2d.
 - `dec1`: prende `torch.cat([up1(b), s2], dim=1)` — concatena lungo la dimensione dei canali l'output dell'upsampling (128 ch) con la skip connection dall'encoder (64 ch) → 192 canali totali → riduce a 64.
 - `up2`: 14×14 → 28×28
 - `dec2`: concatena dec1 (64 ch) + skip s1 (32 ch) → 96 canali → riduce a 32
 
 **Head** (output finale):
-- `Conv2d(32, 1, kernel_size=1)`: convoluzione 1×1, combina linearmente le 32 feature maps in 1 canale (l'immagine ricostruita). Il kernel 1×1 non guarda il vicinato, agisce pixel per pixel.
+
+- `Conv2d(32, 1, kernel_size=1)`: convoluzione 1×1, combina linearmente le 32 feature maps in 1 canale (l'immagine ricostruita). Il kernel 1×1 non guarda il vicinato, agisce pixel per pixel(sempre across feature maps)
 - `Sigmoid()`: schiaccia l'output in `[0, 1]`, compatibile con i label normalizzati.
 
 ### Forward pass
@@ -216,7 +221,7 @@ model.train()
 model.to(device)
 ```
 
-`Model()` istanzia la rete con pesi casuali. `model.train()` attiva le modalità specifiche del training (BatchNorm usa le statistiche del batch corrente, Dropout — se presente — è attivo). `model.to(device)` sposta tutti i parametri sul device scelto.
+`Model()` istanzia la rete con pesi casuali. `model.train()` attiva le modalità specifiche del training (BatchNorm usa le statistiche del batchcorrente, Dropout — se presente — è attivo). `model.to(device)` sposta tutti i parametri sul device scelto.
 
 ### Loss function
 
@@ -345,7 +350,7 @@ Poi orchestra la pipeline: carica i dati → addestra il modello → genera il f
 
 ## Riepilogo visivo del flusso
 
-```
+```text
 train_data.npz          test_data.npz
 (60k immagini intere)   (10k immagini mascherate)
         │                       │

@@ -115,6 +115,8 @@ def training(train_data_input, train_data_label, **kwargs):
     Returns:
     - model: torch.nn.Module
     """
+
+    #Initilize model
     model = Model()
     model.train()
     model.to(device)
