@@ -251,9 +251,9 @@ dataset = TensorDataset(train_data_input, train_data_label)
 data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 ```
 
-`TensorDataset` accoppia input e label: ogni elemento `i` restituisce `(train_data_input[i], train_data_label[i])`.
+`TensorDataset` accoppia input e label: ogni elemento `dataset[i]` = `(train_data_input[i], train_data_label[i])`.
 
-`DataLoader` gestisce l'iterazione sui dati in **batch** (mini-gruppi). Invece di aggiornare i pesi su una sola immagine alla volta (troppo rumoroso) o su tutte le 60k contemporaneamente (troppa memoria), usiamo batch da 256 immagini — un buon compromesso.
+`DataLoader` gestisce l'iterazione sui dati in **batch** (mini-gruppi). Invece di aggiornare i pesi su una sola immagine alla volta (troppo rumoroso) o su tutte le 60k contemporaneamente (troppa memoria), usiamo batch da 256 immagini — un buon compromesso. (mini-batch Stochastic Gradient Descent)
 
 `shuffle=True` mescola i dati a ogni epoca. Senza shuffle, la rete vedrebbe sempre prima tutti gli zeri, poi tutti gli uni, ecc. — il gradiente sarebbe molto biased e il training instabile.
 
@@ -274,7 +274,9 @@ Un'**epoca** è un passaggio completo su tutti i 60k esempi di training. Con bat
 
 `optimizer.zero_grad()` è necessario perché PyTorch accumula i gradienti di default — se non si azzerano, i gradienti delle iterazioni precedenti si sommano a quelli correnti.
 
-`loss.backward()` calcola le derivate parziali della loss rispetto a ogni parametro della rete (backpropagation). `optimizer.step()` usa quelle derivate per spostare i pesi nella direzione che riduce la loss.
+`loss.backward()` calcola le derivate parziali/i gradienti della loss rispetto a ogni parametro della rete (backpropagation).
+
+`optimizer.step()` usa quelle derivate/quei gradienti per spostare i pesi nella direzione che riduce la loss.
 
 Con **15 epoche** la rete vede ogni immagine 15 volte, convergendo a una loss MSE ~0.038 sul centro.
 
@@ -297,7 +299,8 @@ with torch.no_grad():
 ### Inferenza a batch
 
 ```python
-for i in range(0, test_data_input.shape[0], batch_size):
+for i in range(0, test_data_input.shape[0], batch_size): 
+    #test_data_input.shape[0]=10000=Ntest samples
     output = model(test_data_input[i : i + batch_size])
     test_data_output.append(output.cpu())
 test_data_output = torch.cat(test_data_output)
